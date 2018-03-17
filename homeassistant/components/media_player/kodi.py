@@ -10,31 +10,28 @@ from functools import wraps
 import logging
 import urllib
 import re
-import os
 
 import aiohttp
 import voluptuous as vol
 
-from homeassistant.config import load_yaml_config_file
 from homeassistant.components.media_player import (
     SUPPORT_NEXT_TRACK, SUPPORT_PAUSE, SUPPORT_PREVIOUS_TRACK, SUPPORT_SEEK,
     SUPPORT_PLAY_MEDIA, SUPPORT_VOLUME_MUTE, SUPPORT_VOLUME_SET, SUPPORT_STOP,
     SUPPORT_TURN_OFF, SUPPORT_PLAY, SUPPORT_VOLUME_STEP, SUPPORT_SHUFFLE_SET,
     MediaPlayerDevice, PLATFORM_SCHEMA, MEDIA_TYPE_MUSIC, MEDIA_TYPE_TVSHOW,
-    MEDIA_TYPE_VIDEO, MEDIA_TYPE_PLAYLIST, MEDIA_PLAYER_SCHEMA, DOMAIN,
-    SUPPORT_TURN_ON)
+    MEDIA_TYPE_VIDEO, MEDIA_TYPE_CHANNEL, MEDIA_TYPE_PLAYLIST,
+    MEDIA_PLAYER_SCHEMA, DOMAIN, SUPPORT_TURN_ON)
 from homeassistant.const import (
     STATE_IDLE, STATE_OFF, STATE_PAUSED, STATE_PLAYING, CONF_HOST, CONF_NAME,
-    CONF_PORT, CONF_SSL, CONF_PROXY_SSL, CONF_USERNAME, CONF_PASSWORD,
+    CONF_PORT, CONF_PROXY_SSL, CONF_USERNAME, CONF_PASSWORD,
     CONF_TIMEOUT, EVENT_HOMEASSISTANT_STOP)
 from homeassistant.core import callback
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers import script, config_validation as cv
-from homeassistant.helpers.deprecation import get_deprecated
 from homeassistant.helpers.template import Template
 from homeassistant.util.yaml import dump
 
-REQUIREMENTS = ['jsonrpc-async==0.6', 'jsonrpc-websocket==0.5']
+REQUIREMENTS = ['jsonrpc-async==0.6', 'jsonrpc-websocket==0.6']
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -74,6 +71,8 @@ MEDIA_TYPES = {
     'tvshow': MEDIA_TYPE_TVSHOW,
     'season': MEDIA_TYPE_TVSHOW,
     'episode': MEDIA_TYPE_TVSHOW,
+    # Type 'channel' is used for radio or tv streams from pvr
+    'channel': MEDIA_TYPE_CHANNEL,
 }
 
 SUPPORT_KODI = SUPPORT_PAUSE | SUPPORT_VOLUME_SET | SUPPORT_VOLUME_MUTE | \
@@ -87,7 +86,7 @@ PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend({
     vol.Optional(CONF_PORT, default=DEFAULT_PORT): cv.port,
     vol.Optional(CONF_TCP_PORT, default=DEFAULT_TCP_PORT): cv.port,
     vol.Optional(CONF_PROXY_SSL, default=DEFAULT_PROXY_SSL): cv.boolean,
-    vol.Optional(CONF_TURN_ON_ACTION, default=None): cv.SCRIPT_SCHEMA,
+    vol.Optional(CONF_TURN_ON_ACTION): cv.SCRIPT_SCHEMA,
     vol.Optional(CONF_TURN_OFF_ACTION):
         vol.Any(cv.SCRIPT_SCHEMA, vol.In(DEPRECATED_TURN_OFF_ACTIONS)),
     vol.Optional(CONF_TIMEOUT, default=DEFAULT_TIMEOUT): cv.positive_int,
@@ -161,15 +160,8 @@ def async_setup_platform(hass, config, async_add_devices, discovery_info=None):
     host = config.get(CONF_HOST)
     port = config.get(CONF_PORT)
     tcp_port = config.get(CONF_TCP_PORT)
-    encryption = get_deprecated(config, CONF_PROXY_SSL, CONF_SSL)
+    encryption = config.get(CONF_PROXY_SSL)
     websocket = config.get(CONF_ENABLE_WEBSOCKET)
-
-    if host.startswith('http://') or host.startswith('https://'):
-        host = host.lstrip('http://').lstrip('https://')
-        _LOGGER.warning(
-            "Kodi host name should no longer conatin http:// See updated "
-            "definitions here: "
-            "https://home-assistant.io/components/media_player.kodi/")
 
     entity = KodiDevice(
         hass,
@@ -215,15 +207,11 @@ def async_setup_platform(hass, config, async_add_devices, discovery_info=None):
     if hass.services.has_service(DOMAIN, SERVICE_ADD_MEDIA):
         return
 
-    descriptions = yield from hass.async_add_job(
-        load_yaml_config_file, os.path.join(
-            os.path.dirname(__file__), 'services.yaml'))
-
     for service in SERVICE_TO_METHOD:
         schema = SERVICE_TO_METHOD[service]['schema']
         hass.services.async_register(
             DOMAIN, service, async_service_handler,
-            description=descriptions.get(service), schema=schema)
+            schema=schema)
 
 
 def cmd(func):
@@ -333,7 +321,7 @@ class KodiDevice(MediaPlayerDevice):
             # If a new item is playing, force a complete refresh
             force_refresh = data['item']['id'] != self._item.get('id')
 
-        self.hass.async_add_job(self.async_update_ha_state(force_refresh))
+        self.async_schedule_update_ha_state(force_refresh)
 
     @callback
     def async_on_stop(self, sender, data):
@@ -345,14 +333,14 @@ class KodiDevice(MediaPlayerDevice):
         self._players = []
         self._properties = {}
         self._item = {}
-        self.hass.async_add_job(self.async_update_ha_state())
+        self.async_schedule_update_ha_state()
 
     @callback
     def async_on_volume_changed(self, sender, data):
         """Handle the volume changes."""
         self._app_properties['volume'] = data['volume']
         self._app_properties['muted'] = data['muted']
-        self.hass.async_add_job(self.async_update_ha_state())
+        self.async_schedule_update_ha_state()
 
     @callback
     def async_on_quit(self, sender, data):
@@ -411,7 +399,7 @@ class KodiDevice(MediaPlayerDevice):
                 # to reconnect on the next poll.
                 pass
             # Update HA state after Kodi disconnects
-            self.hass.async_add_job(self.async_update_ha_state())
+            self.async_schedule_update_ha_state()
 
         # Create a task instead of adding a tracking job, since this task will
         # run until the websocket connection is closed.

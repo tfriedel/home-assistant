@@ -8,17 +8,19 @@ import asyncio
 from collections import defaultdict
 import functools as ft
 import logging
-
 import async_timeout
+
+import voluptuous as vol
+
 from homeassistant.const import (
-    ATTR_ENTITY_ID, CONF_HOST, CONF_PORT, EVENT_HOMEASSISTANT_STOP,
-    STATE_UNKNOWN)
+    ATTR_ENTITY_ID, CONF_COMMAND, CONF_HOST, CONF_PORT,
+    EVENT_HOMEASSISTANT_STOP, STATE_UNKNOWN)
 from homeassistant.core import CoreState, callback
 from homeassistant.exceptions import HomeAssistantError
 import homeassistant.helpers.config_validation as cv
 from homeassistant.helpers.deprecation import get_deprecated
 from homeassistant.helpers.entity import Entity
-import voluptuous as vol
+
 
 REQUIREMENTS = ['rflink==0.0.34']
 
@@ -35,6 +37,7 @@ CONF_GROUP = 'group'
 CONF_NOGROUP_ALIASES = 'nogroup_aliases'
 CONF_NOGROUP_ALIASSES = 'nogroup_aliasses'
 CONF_DEVICE_DEFAULTS = 'device_defaults'
+CONF_DEVICE_ID = 'device_id'
 CONF_DEVICES = 'devices'
 CONF_AUTOMATIC_ADD = 'automatic_add'
 CONF_FIRE_EVENT = 'fire_event'
@@ -60,6 +63,8 @@ RFLINK_GROUP_COMMANDS = ['allon', 'alloff']
 
 DOMAIN = 'rflink'
 
+SERVICE_SEND_COMMAND = 'send_command'
+
 DEVICE_DEFAULTS_SCHEMA = vol.Schema({
     vol.Optional(CONF_FIRE_EVENT, default=False): cv.boolean,
     vol.Optional(CONF_SIGNAL_REPETITIONS,
@@ -69,7 +74,7 @@ DEVICE_DEFAULTS_SCHEMA = vol.Schema({
 CONFIG_SCHEMA = vol.Schema({
     DOMAIN: vol.Schema({
         vol.Required(CONF_PORT): vol.Any(cv.port, cv.string),
-        vol.Optional(CONF_HOST, default=None): cv.string,
+        vol.Optional(CONF_HOST): cv.string,
         vol.Optional(CONF_WAIT_FOR_ACK, default=True): cv.boolean,
         vol.Optional(CONF_RECONNECT_INTERVAL,
                      default=DEFAULT_RECONNECT_INTERVAL): int,
@@ -77,6 +82,11 @@ CONFIG_SCHEMA = vol.Schema({
             vol.All(cv.ensure_list, [cv.string]),
     }),
 }, extra=vol.ALLOW_EXTRA)
+
+SEND_COMMAND_SCHEMA = vol.Schema({
+    vol.Required(CONF_DEVICE_ID): cv.string,
+    vol.Required(CONF_COMMAND): cv.string,
+})
 
 
 def identify_event_type(event):
@@ -110,6 +120,19 @@ def async_setup(hass, config):
 
     # Allow platform to specify function to register new unknown devices
     hass.data[DATA_DEVICE_REGISTER] = {}
+
+    @asyncio.coroutine
+    def async_send_command(call):
+        """Send Rflink command."""
+        _LOGGER.debug('Rflink command for %s', str(call.data))
+        if not (yield from RflinkCommand.send_command(
+                call.data.get(CONF_DEVICE_ID),
+                call.data.get(CONF_COMMAND))):
+            _LOGGER.error('Failed Rflink command for %s', str(call.data))
+
+    hass.services.async_register(
+        DOMAIN, SERVICE_SEND_COMMAND, async_send_command,
+        schema=SEND_COMMAND_SCHEMA)
 
     @callback
     def event_callback(event):
@@ -152,7 +175,7 @@ def async_setup(hass, config):
                     hass.data[DATA_DEVICE_REGISTER][event_type], event)
 
     # When connecting to tcp host instead of serial port (optional)
-    host = config[DOMAIN][CONF_HOST]
+    host = config[DOMAIN].get(CONF_HOST)
     # TCP port when host configured, otherwise serial port
     port = config[DOMAIN][CONF_PORT]
 
@@ -244,7 +267,7 @@ class RflinkDevice(Entity):
         self._handle_event(event)
 
         # Propagate changes through ha
-        self.hass.async_add_job(self.async_update_ha_state())
+        self.async_schedule_update_ha_state()
 
         # Put command onto bus for user to subscribe to
         if self._should_fire_event and identify_event_type(
@@ -312,6 +335,12 @@ class RflinkCommand(RflinkDevice):
         """Return connection status."""
         return bool(cls._protocol)
 
+    @classmethod
+    @asyncio.coroutine
+    def send_command(cls, device_id, action):
+        """Send device command to Rflink and wait for acknowledgement."""
+        return (yield from cls._protocol.send_command_ack(device_id, action))
+
     @asyncio.coroutine
     def _async_handle_command(self, command, *args):
         """Do bookkeeping for command, send it to rflink and update state."""
@@ -336,6 +365,19 @@ class RflinkCommand(RflinkDevice):
             # if the state is true, it gets set as false
             self._state = self._state in [STATE_UNKNOWN, False]
 
+        # Cover options for RFlink
+        elif command == 'close_cover':
+            cmd = 'DOWN'
+            self._state = False
+
+        elif command == 'open_cover':
+            cmd = 'UP'
+            self._state = True
+
+        elif command == 'stop_cover':
+            cmd = 'STOP'
+            self._state = True
+
         # Send initial command and queue repetitions.
         # This allows the entity state to be updated quickly and not having to
         # wait for all repetitions to be sent
@@ -348,7 +390,7 @@ class RflinkCommand(RflinkDevice):
         """Cancel queued signal repetition commands.
 
         For example when user changed state while repetitions are still
-        queued for broadcast. Or when a incoming Rflink command (remote
+        queued for broadcast. Or when an incoming Rflink command (remote
         switch) changes the state.
         """
         # cancel any outstanding tasks from the previous state change

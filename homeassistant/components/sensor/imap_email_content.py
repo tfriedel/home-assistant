@@ -53,7 +53,7 @@ def setup_platform(hass, config, add_devices, discovery_info=None):
         config.get(CONF_SENDERS), value_template)
 
     if sensor.connected:
-        add_devices([sensor])
+        add_devices([sensor], True)
     else:
         return False
 
@@ -219,17 +219,19 @@ class EmailContentSensor(Entity):
             return
 
         if self.sender_allowed(email_message):
-            message_body = EmailContentSensor.get_msg_text(email_message)
+            message = EmailContentSensor.get_msg_subject(email_message)
 
             if self._value_template is not None:
-                message_body = self.render_template(email_message)
+                message = self.render_template(email_message)
 
-            self._message = message_body
+            self._message = message
             self._state_attributes = {
                 ATTR_FROM:
                     EmailContentSensor.get_msg_sender(email_message),
                 ATTR_SUBJECT:
                     EmailContentSensor.get_msg_subject(email_message),
                 ATTR_DATE:
-                    email_message['Date']
+                    email_message['Date'],
+                ATTR_BODY:
+                    EmailContentSensor.get_msg_text(email_message)
             }

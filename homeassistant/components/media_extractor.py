@@ -5,26 +5,25 @@ For more details about this component, please refer to the documentation at
 https://home-assistant.io/components/media_extractor/
 """
 import logging
-import os
+
 import voluptuous as vol
 
 from homeassistant.components.media_player import (
     ATTR_ENTITY_ID, ATTR_MEDIA_CONTENT_ID, ATTR_MEDIA_CONTENT_TYPE,
     DOMAIN as MEDIA_PLAYER_DOMAIN, MEDIA_PLAYER_PLAY_MEDIA_SCHEMA,
     SERVICE_PLAY_MEDIA)
-from homeassistant.config import load_yaml_config_file
 from homeassistant.helpers import config_validation as cv
 
-REQUIREMENTS = ['youtube_dl==2017.7.23']
+REQUIREMENTS = ['youtube_dl==2018.02.11']
 
 _LOGGER = logging.getLogger(__name__)
 
-DOMAIN = 'media_extractor'
-DEPENDENCIES = ['media_player']
-
 CONF_CUSTOMIZE_ENTITIES = 'customize'
 CONF_DEFAULT_STREAM_QUERY = 'default_query'
+
 DEFAULT_STREAM_QUERY = 'best'
+DEPENDENCIES = ['media_player']
+DOMAIN = 'media_extractor'
 
 CONFIG_SCHEMA = vol.Schema({
     DOMAIN: vol.Schema({
@@ -37,18 +36,11 @@ CONFIG_SCHEMA = vol.Schema({
 
 def setup(hass, config):
     """Set up the media extractor service."""
-    descriptions = load_yaml_config_file(
-        os.path.join(os.path.dirname(__file__),
-                     'media_player', 'services.yaml'))
-
     def play_media(call):
-        """Get stream URL and send it to the media_player.play_media."""
+        """Get stream URL and send it to the play_media service."""
         MediaExtractor(hass, config[DOMAIN], call.data).extract_and_send()
 
-    hass.services.register(DOMAIN,
-                           SERVICE_PLAY_MEDIA,
-                           play_media,
-                           description=descriptions[SERVICE_PLAY_MEDIA],
+    hass.services.register(DOMAIN, SERVICE_PLAY_MEDIA, play_media,
                            schema=MEDIA_PLAYER_PLAY_MEDIA_SCHEMA)
 
     return True
@@ -66,7 +58,7 @@ class MEQueryException(Exception):
     pass
 
 
-class MediaExtractor:
+class MediaExtractor(object):
     """Class which encapsulates all extraction logic."""
 
     def __init__(self, hass, component_config, call_data):
@@ -93,7 +85,7 @@ class MediaExtractor:
         else:
             entities = self.get_entities()
 
-            if len(entities) == 0:
+            if not entities:
                 self.call_media_player_service(stream_selector, None)
 
             for entity_id in entities:
@@ -107,17 +99,16 @@ class MediaExtractor:
         ydl = YoutubeDL({'quiet': True, 'logger': _LOGGER})
 
         try:
-            all_media = ydl.extract_info(self.get_media_url(),
-                                         process=False)
+            all_media = ydl.extract_info(self.get_media_url(), process=False)
         except DownloadError:
             # This exception will be logged by youtube-dl itself
             raise MEDownloadException()
 
         if 'entries' in all_media:
-            _LOGGER.warning("Playlists are not supported, "
-                            "looking for the first video")
+            _LOGGER.warning(
+                "Playlists are not supported, looking for the first video")
             entries = list(all_media['entries'])
-            if len(entries) > 0:
+            if entries:
                 selected_media = entries[0]
             else:
                 _LOGGER.error("Playlist is empty")
@@ -125,26 +116,15 @@ class MediaExtractor:
         else:
             selected_media = all_media
 
-        try:
-            media_info = ydl.process_ie_result(selected_media,
-                                               download=False)
-        except (ExtractorError, DownloadError):
-            # This exception will be logged by youtube-dl itself
-            raise MEDownloadException()
-
         def stream_selector(query):
-            """Find stream url that matches query."""
+            """Find stream URL that matches query."""
             try:
-                format_selector = ydl.build_format_selector(query)
-            except (SyntaxError, ValueError, AttributeError) as ex:
-                _LOGGER.error(ex)
-                raise MEQueryException()
-
-            try:
-                requested_stream = next(format_selector(media_info))
-            except (KeyError, StopIteration):
-                _LOGGER.error("Could not extract stream for the query: %s",
-                              query)
+                ydl.params['format'] = query
+                requested_stream = ydl.process_ie_result(
+                    selected_media, download=False)
+            except (ExtractorError, DownloadError):
+                _LOGGER.error(
+                    "Could not extract stream for the query: %s", query)
                 raise MEQueryException()
 
             return requested_stream['url']
@@ -152,7 +132,7 @@ class MediaExtractor:
         return stream_selector
 
     def call_media_player_service(self, stream_selector, entity_id):
-        """Call media_player.play_media service."""
+        """Call Media player play_media service."""
         stream_query = self.get_stream_query_for_entity(entity_id)
 
         try:
@@ -175,8 +155,8 @@ class MediaExtractor:
 
     def get_stream_query_for_entity(self, entity_id):
         """Get stream format query for entity."""
-        default_stream_query = self.config.get(CONF_DEFAULT_STREAM_QUERY,
-                                               DEFAULT_STREAM_QUERY)
+        default_stream_query = self.config.get(
+            CONF_DEFAULT_STREAM_QUERY, DEFAULT_STREAM_QUERY)
 
         if entity_id:
             media_content_type = self.call_data.get(ATTR_MEDIA_CONTENT_TYPE)

@@ -12,16 +12,19 @@ from aiohttp import web
 
 from homeassistant.components.http import HomeAssistantView
 from homeassistant.components import recorder
-from homeassistant.const import (CONF_DOMAINS, CONF_ENTITIES, CONF_EXCLUDE,
-                                 CONF_INCLUDE, EVENT_STATE_CHANGED,
-                                 TEMP_CELSIUS, TEMP_FAHRENHEIT)
+from homeassistant.const import (
+    CONF_DOMAINS, CONF_ENTITIES, CONF_EXCLUDE, CONF_INCLUDE,
+    EVENT_STATE_CHANGED, TEMP_FAHRENHEIT, CONTENT_TYPE_TEXT_PLAIN,
+    ATTR_TEMPERATURE, ATTR_UNIT_OF_MEASUREMENT)
 from homeassistant import core as hacore
 from homeassistant.helpers import state as state_helper
 from homeassistant.util.temperature import fahrenheit_to_celsius
 
+REQUIREMENTS = ['prometheus_client==0.1.0']
+
 _LOGGER = logging.getLogger(__name__)
 
-REQUIREMENTS = ['prometheus_client==0.0.19']
+API_ENDPOINT = '/api/prometheus'
 
 DOMAIN = 'prometheus'
 DEPENDENCIES = ['http']
@@ -29,8 +32,6 @@ DEPENDENCIES = ['http']
 CONFIG_SCHEMA = vol.Schema({
     DOMAIN: recorder.FILTER_SCHEMA,
 }, extra=vol.ALLOW_EXTRA)
-
-API_ENDPOINT = '/api/prometheus'
 
 
 def setup(hass, config):
@@ -45,11 +46,10 @@ def setup(hass, config):
     metrics = Metrics(prometheus_client, exclude, include)
 
     hass.bus.listen(EVENT_STATE_CHANGED, metrics.handle_event)
-
     return True
 
 
-class Metrics:
+class Metrics(object):
     """Model all of the metrics which should be exposed to Prometheus."""
 
     def __init__(self, prometheus_client, exclude, include):
@@ -81,7 +81,7 @@ class Metrics:
                                  entity_id not in self.include_entities):
             return
 
-        handler = '_handle_' + domain
+        handler = '_handle_{}'.format(domain)
 
         if hasattr(self, handler):
             getattr(self, handler)(state)
@@ -160,50 +160,47 @@ class Metrics:
         value = state_helper.state_as_number(state)
         metric.labels(**self._labels(state)).set(value)
 
+    def _handle_climate(self, state):
+        temp = state.attributes.get(ATTR_TEMPERATURE)
+        if temp:
+            unit = state.attributes.get(ATTR_UNIT_OF_MEASUREMENT)
+            if unit == TEMP_FAHRENHEIT:
+                temp = fahrenheit_to_celsius(temp)
+            metric = self._metric(
+                'temperature_c', self.prometheus_client.Gauge,
+                'Temperature in degrees Celsius')
+            metric.labels(**self._labels(state)).set(temp)
+
+        metric = self._metric(
+            'climate_state', self.prometheus_client.Gauge,
+            'State of the thermostat (0/1)')
+        try:
+            value = state_helper.state_as_number(state)
+            metric.labels(**self._labels(state)).set(value)
+        except ValueError:
+            pass
+
     def _handle_sensor(self, state):
-        _sensor_types = {
-            TEMP_CELSIUS: (
-                'temperature_c', self.prometheus_client.Gauge,
-                'Temperature in degrees Celsius',
-            ),
-            TEMP_FAHRENHEIT: (
-                'temperature_c', self.prometheus_client.Gauge,
-                'Temperature in degrees Celsius',
-            ),
-            '%': (
-                'relative_humidity', self.prometheus_client.Gauge,
-                'Relative humidity (0..100)',
-            ),
-            'lux': (
-                'light_lux', self.prometheus_client.Gauge,
-                'Light level in lux',
-            ),
-            'kWh': (
-                'electricity_used_kwh', self.prometheus_client.Gauge,
-                'Electricity used by this device in KWh',
-            ),
-            'V': (
-                'voltage', self.prometheus_client.Gauge,
-                'Currently reported voltage in Volts',
-            ),
-            'W': (
-                'electricity_usage_w', self.prometheus_client.Gauge,
-                'Currently reported electricity draw in Watts',
-            ),
-        }
 
-        unit = state.attributes.get('unit_of_measurement')
-        metric = _sensor_types.get(unit)
+        unit = state.attributes.get(ATTR_UNIT_OF_MEASUREMENT)
+        metric = state.entity_id.split(".")[1]
 
-        if metric is not None:
-            metric = self._metric(*metric)
-            try:
-                value = state_helper.state_as_number(state)
-                if unit == TEMP_FAHRENHEIT:
-                    value = fahrenheit_to_celsius(value)
-                metric.labels(**self._labels(state)).set(value)
-            except ValueError:
-                pass
+        try:
+            int(metric.split("_")[-1])
+            metric = "_".join(metric.split("_")[:-1])
+        except ValueError:
+            pass
+
+        _metric = self._metric(metric, self.prometheus_client.Gauge,
+                               state.entity_id)
+
+        try:
+            value = state_helper.state_as_number(state)
+            if unit == TEMP_FAHRENHEIT:
+                value = fahrenheit_to_celsius(value)
+            _metric.labels(**self._labels(state)).set(value)
+        except ValueError:
+            pass
 
         self._battery(state)
 
@@ -213,11 +210,24 @@ class Metrics:
             self.prometheus_client.Gauge,
             'State of the switch (0/1)',
         )
-        value = state_helper.state_as_number(state)
-        metric.labels(**self._labels(state)).set(value)
+
+        try:
+            value = state_helper.state_as_number(state)
+            metric.labels(**self._labels(state)).set(value)
+        except ValueError:
+            pass
 
     def _handle_zwave(self, state):
         self._battery(state)
+
+    def _handle_automation(self, state):
+        metric = self._metric(
+            'automation_triggered_count',
+            self.prometheus_client.Counter,
+            'Count of times an automation has been triggered',
+        )
+
+        metric.labels(**self._labels(state)).inc()
 
 
 class PrometheusView(HomeAssistantView):
@@ -233,8 +243,8 @@ class PrometheusView(HomeAssistantView):
     @asyncio.coroutine
     def get(self, request):
         """Handle request for Prometheus metrics."""
-        _LOGGER.debug('Received Prometheus metrics request')
+        _LOGGER.debug("Received Prometheus metrics request")
 
         return web.Response(
             body=self.prometheus_client.generate_latest(),
-            content_type="text/plain")
+            content_type=CONTENT_TYPE_TEXT_PLAIN)

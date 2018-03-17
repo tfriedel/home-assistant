@@ -24,7 +24,7 @@ SENSOR_TYPES = {}
 
 
 def setup_platform(hass, config, add_devices, discovery_info=None):
-    """Setup the ComfoConnect fan platform."""
+    """Set up the ComfoConnect fan platform."""
     from pycomfoconnect import (
         SENSOR_TEMPERATURE_EXTRACT, SENSOR_HUMIDITY_EXTRACT,
         SENSOR_TEMPERATURE_OUTDOOR, SENSOR_HUMIDITY_OUTDOOR,
@@ -92,13 +92,12 @@ def setup_platform(hass, config, add_devices, discovery_info=None):
 
     add_devices(sensors, True)
 
-    return
-
 
 class ComfoConnectSensor(Entity):
     """Representation of a ComfoConnect sensor."""
 
-    def __init__(self, hass, name, ccb: ComfoConnectBridge, sensor_type):
+    def __init__(self, hass, name, ccb: ComfoConnectBridge,
+                 sensor_type) -> None:
         """Initialize the ComfoConnect sensor."""
         self._ccb = ccb
         self._sensor_type = sensor_type

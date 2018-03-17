@@ -14,7 +14,7 @@ from requests.exceptions import ConnectionError as ConnectError, \
 from homeassistant.components.sensor import PLATFORM_SCHEMA
 from homeassistant.const import (
     CONF_API_KEY, CONF_NAME, CONF_MONITORED_CONDITIONS, ATTR_ATTRIBUTION,
-    CONF_LATITUDE, CONF_LONGITUDE)
+    CONF_LATITUDE, CONF_LONGITUDE, UNIT_UV_INDEX)
 from homeassistant.helpers.entity import Entity
 from homeassistant.util import Throttle
 import homeassistant.helpers.config_validation as cv
@@ -56,13 +56,16 @@ SENSOR_TYPES = {
     'precip_probability': ['Precip Probability',
                            '%', '%', '%', '%', '%', 'mdi:water-percent',
                            ['currently', 'minutely', 'hourly', 'daily']],
+    'precip_accumulation': ['Precip Accumulation',
+                            'cm', 'in', 'cm', 'cm', 'cm', 'mdi:weather-snowy',
+                            ['hourly', 'daily']],
     'temperature': ['Temperature',
                     '°C', '°F', '°C', '°C', '°C', 'mdi:thermometer',
                     ['currently', 'hourly']],
     'apparent_temperature': ['Apparent Temperature',
                              '°C', '°F', '°C', '°C', '°C', 'mdi:thermometer',
                              ['currently', 'hourly']],
-    'dew_point': ['Dew point', '°C', '°F', '°C', '°C', '°C',
+    'dew_point': ['Dew Point', '°C', '°F', '°C', '°C', '°C',
                   'mdi:thermometer', ['currently', 'hourly', 'daily']],
     'wind_speed': ['Wind Speed', 'm/s', 'mph', 'km/h', 'mph', 'mph',
                    'mdi:weather-windy', ['currently', 'hourly', 'daily']],
@@ -96,6 +99,10 @@ SENSOR_TYPES = {
     'precip_intensity_max': ['Daily Max Precip Intensity',
                              'mm', 'in', 'mm', 'mm', 'mm', 'mdi:thermometer',
                              ['currently', 'hourly', 'daily']],
+    'uv_index': ['UV Index',
+                 UNIT_UV_INDEX, UNIT_UV_INDEX, UNIT_UV_INDEX,
+                 UNIT_UV_INDEX, UNIT_UV_INDEX, 'mdi:weather-sunny',
+                 ['currently', 'hourly', 'daily']],
 }
 
 CONDITION_PICTURES = {
@@ -265,7 +272,8 @@ class DarkSkySensor(Entity):
                               'temperature_max',
                               'apparent_temperature_min',
                               'apparent_temperature_max',
-                              'precip_intensity_max']):
+                              'precip_intensity_max',
+                              'precip_accumulation']):
             self.forecast_data.update_daily()
             daily = self.forecast_data.data_daily
             if self.type == 'daily_summary':
@@ -305,7 +313,8 @@ class DarkSkySensor(Entity):
                             'temperature_min', 'temperature_max',
                             'apparent_temperature_min',
                             'apparent_temperature_max',
-                            'pressure', 'ozone']):
+                            'precip_accumulation',
+                            'pressure', 'ozone', 'uvIndex']):
             return round(state, 1)
         return state
 

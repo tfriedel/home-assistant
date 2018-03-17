@@ -1,23 +1,23 @@
-"""Support for Dyson Pure Cool Link Sensors.
+"""
+Support for Dyson Pure Cool Link Sensors.
 
 For more details about this platform, please refer to the documentation at
 https://home-assistant.io/components/sensor.dyson/
 """
-import logging
 import asyncio
+import logging
 
-from homeassistant.const import TEMP_CELSIUS
 from homeassistant.components.dyson import DYSON_DEVICES
-
+from homeassistant.const import STATE_OFF, TEMP_CELSIUS
 from homeassistant.helpers.entity import Entity
 
 DEPENDENCIES = ['dyson']
 
 SENSOR_UNITS = {
-    "filter_life": "hours",
-    "humidity": "%",
-    "dust": "level",
-    "air_quality": "level"
+    'air_quality': 'level',
+    'dust': 'level',
+    'filter_life': 'hours',
+    'humidity': '%',
 }
 
 _LOGGER = logging.getLogger(__name__)
@@ -25,11 +25,13 @@ _LOGGER = logging.getLogger(__name__)
 
 def setup_platform(hass, config, add_devices, discovery_info=None):
     """Set up the Dyson Sensors."""
-    _LOGGER.info("Creating new Dyson fans")
+    _LOGGER.debug("Creating new Dyson fans")
     devices = []
     unit = hass.config.units.temperature_unit
     # Get Dyson Devices from parent component
-    for device in hass.data[DYSON_DEVICES]:
+    from libpurecoollink.dyson_pure_cool_link import DysonPureCoolLink
+    for device in [d for d in hass.data[DYSON_DEVICES] if
+                   isinstance(d, DysonPureCoolLink)]:
         devices.append(DysonFilterLifeSensor(hass, device))
         devices.append(DysonDustSensor(hass, device))
         devices.append(DysonHumiditySensor(hass, device))
@@ -50,12 +52,12 @@ class DysonSensor(Entity):
 
     @asyncio.coroutine
     def async_added_to_hass(self):
-        """Callback when entity is added to hass."""
+        """Call when entity is added to hass."""
         self.hass.async_add_job(
             self._device.add_message_listener, self.on_message)
 
     def on_message(self, message):
-        """Called when new messages received from the fan."""
+        """Handle new messages which are received from the fan."""
         # Prevent refreshing if not needed
         if self._old_value is None or self._old_value != self.state:
             _LOGGER.debug("Message received for %s device: %s", self.name,
@@ -128,6 +130,8 @@ class DysonHumiditySensor(DysonSensor):
     def state(self):
         """Return Dust value."""
         if self._device.environmental_state:
+            if self._device.environmental_state.humidity == 0:
+                return STATE_OFF
             return self._device.environmental_state.humidity
         return None
 
@@ -151,6 +155,8 @@ class DysonTemperatureSensor(DysonSensor):
         """Return Dust value."""
         if self._device.environmental_state:
             temperature_kelvin = self._device.environmental_state.temperature
+            if temperature_kelvin == 0:
+                return STATE_OFF
             if self._unit == TEMP_CELSIUS:
                 return float("{0:.1f}".format(temperature_kelvin - 273.15))
             return float("{0:.1f}".format(temperature_kelvin * 9 / 5 - 459.67))
@@ -172,7 +178,7 @@ class DysonAirQualitySensor(DysonSensor):
 
     @property
     def state(self):
-        """Return Air QUality value."""
+        """Return Air Quality value."""
         if self._device.environmental_state:
             return self._device.environmental_state.volatil_organic_compounds
         return None

@@ -39,13 +39,13 @@ ENTITY_ID_FORMAT = DOMAIN + '.{}'
 
 GROUP_NAME_ALL_SCRIPTS = 'all scripts'
 
-_SCRIPT_ENTRY_SCHEMA = vol.Schema({
+SCRIPT_ENTRY_SCHEMA = vol.Schema({
     CONF_ALIAS: cv.string,
     vol.Required(CONF_SEQUENCE): cv.SCRIPT_SCHEMA,
 })
 
 CONFIG_SCHEMA = vol.Schema({
-    DOMAIN: vol.Schema({cv.slug: _SCRIPT_ENTRY_SCHEMA})
+    DOMAIN: vol.Schema({cv.slug: SCRIPT_ENTRY_SCHEMA})
 }, extra=vol.ALLOW_EXTRA)
 
 SCRIPT_SERVICE_SCHEMA = vol.Schema(dict)
@@ -60,12 +60,6 @@ RELOAD_SERVICE_SCHEMA = vol.Schema({})
 def is_on(hass, entity_id):
     """Return if the script is on based on the statemachine."""
     return hass.states.is_state(entity_id, STATE_ON)
-
-
-@bind_hass
-def reload(hass):
-    """Reload script component."""
-    hass.services.call(DOMAIN, SERVICE_RELOAD)
 
 
 @bind_hass
@@ -86,6 +80,21 @@ def turn_off(hass, entity_id):
 def toggle(hass, entity_id):
     """Toggle the script."""
     hass.services.call(DOMAIN, SERVICE_TOGGLE, {ATTR_ENTITY_ID: entity_id})
+
+
+@bind_hass
+def reload(hass):
+    """Reload script component."""
+    hass.services.call(DOMAIN, SERVICE_RELOAD)
+
+
+@bind_hass
+def async_reload(hass):
+    """Reload the scripts from config.
+
+    Returns a coroutine object.
+    """
+    return hass.services.async_call(DOMAIN, SERVICE_RELOAD)
 
 
 @asyncio.coroutine
@@ -147,7 +156,7 @@ def _async_process_config(hass, config, component):
     def service_handler(service):
         """Execute a service call to script.<script name>."""
         entity_id = ENTITY_ID_FORMAT.format(service.service)
-        script = component.entities.get(entity_id)
+        script = component.get_entity(entity_id)
         if script.is_on:
             _LOGGER.warning("Script %s already running.", entity_id)
             return
@@ -210,15 +219,11 @@ class ScriptEntity(ToggleEntity):
         """Turn script off."""
         self.script.async_stop()
 
-    def async_remove(self):
-        """Remove script from HASS.
-
-        This method must be run in the event loop and returns a coroutine.
-        """
+    @asyncio.coroutine
+    def async_will_remove_from_hass(self):
+        """Stop script and remove service when it will be removed from HASS."""
         if self.script.is_running:
             self.script.async_stop()
 
         # remove service
         self.hass.services.async_remove(DOMAIN, self.object_id)
-
-        return super().async_remove()

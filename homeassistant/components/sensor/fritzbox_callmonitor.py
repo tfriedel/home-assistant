@@ -21,7 +21,7 @@ from homeassistant.helpers.entity import Entity
 import homeassistant.helpers.config_validation as cv
 from homeassistant.util import Throttle
 
-REQUIREMENTS = ['fritzconnection==0.6.3']
+REQUIREMENTS = ['fritzconnection==0.6.5']
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -70,8 +70,7 @@ def setup_platform(hass, config, add_devices, discovery_info=None):
         phonebook = FritzBoxPhonebook(
             host=host, port=port, username=username, password=password,
             phonebook_id=phonebook_id, prefixes=prefixes)
-    # pylint: disable=bare-except
-    except:
+    except:  # noqa: E722  # pylint: disable=bare-except
         phonebook = None
         _LOGGER.warning("Phonebook with ID %s not found on Fritz!Box",
                         phonebook_id)
@@ -216,7 +215,7 @@ class FritzBoxCallMonitor(object):
             self._sensor.set_attributes(att)
         elif line[1] == "CONNECT":
             self._sensor.set_state(VALUE_CONNECT)
-            att = {"with": line[4], "device": [3], "accepted": isotime}
+            att = {"with": line[4], "device": line[3], "accepted": isotime}
             att["with_name"] = self._sensor.number_to_name(att["with"])
             self._sensor.set_attributes(att)
         elif line[1] == "DISCONNECT":

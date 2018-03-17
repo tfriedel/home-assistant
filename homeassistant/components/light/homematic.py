@@ -1,5 +1,5 @@
 """
-Support for Homematic lighs.
+Support for Homematic lights.
 
 For more details about this platform, please refer to the documentation at
 https://home-assistant.io/components/light.homematic/
@@ -24,8 +24,7 @@ def setup_platform(hass, config, add_devices, discovery_info=None):
 
     devices = []
     for conf in discovery_info[ATTR_DISCOVER_DEVICES]:
-        new_device = HMLight(hass, conf)
-        new_device.link_homematic()
+        new_device = HMLight(conf)
         devices.append(new_device)
 
     add_devices(devices)

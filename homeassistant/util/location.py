@@ -84,7 +84,7 @@ def elevation(latitude, longitude):
 # License: https://github.com/maurycyp/vincenty/blob/master/LICENSE
 # pylint: disable=invalid-name, unused-variable, invalid-sequence-index
 def vincenty(point1: Tuple[float, float], point2: Tuple[float, float],
-             miles: bool=False) -> Optional[float]:
+             miles: bool = False) -> Optional[float]:
     """
     Vincenty formula (inverse method) to calculate the distance.
 
@@ -107,7 +107,7 @@ def vincenty(point1: Tuple[float, float], point2: Tuple[float, float],
     sinU2 = math.sin(U2)
     cosU2 = math.cos(U2)
 
-    for iteration in range(MAX_ITERATIONS):
+    for _ in range(MAX_ITERATIONS):
         sinLambda = math.sin(Lambda)
         cosLambda = math.cos(Lambda)
         sinSigma = math.sqrt((cosU2 * sinLambda) ** 2 +
@@ -146,7 +146,7 @@ def vincenty(point1: Tuple[float, float], point2: Tuple[float, float],
                                           (-3 + 4 * cos2SigmaM ** 2)))
     s = AXIS_B * A * (sigma - deltaSigma)
 
-    s /= 1000  # Converion of meters to kilometers
+    s /= 1000  # Conversion of meters to kilometers
     if miles:
         s *= MILES_PER_KILOMETER  # kilometers to miles
 
